@@ -11,6 +11,7 @@ import json
 init(autoreset=True)
 
 CONFIG_FILE = "db_config.json"
+BATCH_SIZE = 1000
 
 
 def print_banner():
@@ -83,13 +84,17 @@ def get_file_path():
             print(Fore.RED + "[!] Geçersiz dosya yolu. \n")
 
 
-def process_file(file_path, cursor):
+def process_file(file_path, cursor, connection):
     log_file = "error_log.txt"
+    batch_data = []
+    insert_query = """
+        INSERT INTO users (link, username, password)
+        VALUES (%s, %s, %s)
+    """
+
     try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as file:
-            total_lines = sum(1 for _ in file)
         with open(file_path, "r", encoding="utf-8", errors="replace") as file, open(log_file, "w", encoding="utf-8") as log:
-            for line in tqdm(file, total=total_lines, desc="Veriler aktarılıyor", unit="satır", colour="green"):
+            for line in tqdm(file, desc="Veriler aktarılıyor", unit="satır", colour="green"):
                 line = line.strip()
                 try:
                     parts = line.split(":")
@@ -98,14 +103,17 @@ def process_file(file_path, cursor):
                     link, username, password = parts[:3]
                     if not link or not username or not password:
                         raise ValueError("Eksik bir alan var")
-                    insert_query = """
-                    INSERT INTO users (link, username, password)
-                    VALUES (%s, %s, %s)
-                    """
-                    cursor.execute(insert_query, (link, username, password))
-                except ValueError as e:
+                    batch_data.append((link, username, password))
+                    
+                    if len(batch_data) >= BATCH_SIZE:
+                        cursor.executemany(insert_query, batch_data)
+                        connection.commit()
+                        batch_data = []
+                except Exception as e:
                     log.write(f"Hatalı satır: {line} | Hata: {e}\n")
-                    print(Fore.YELLOW + f"[!] Satır format hatası: {line}")
+            if batch_data:
+                cursor.executemany(insert_query, batch_data)
+                connection.commit()
     except FileNotFoundError:
         print(Fore.RED + f"[!] Dosya bulunamadı: {file_path}")
     except Exception as e:
@@ -118,8 +126,7 @@ def main():
     connection, cursor = connect_to_database(db_config)
     try:
         file_path = get_file_path()
-        process_file(file_path, cursor)
-        connection.commit()
+        process_file(file_path, cursor, connection)
         print(Fore.GREEN + "\n[✓] Tüm veriler başarıyla veritabanına aktarıldı.")
     except Exception as e:
         print(Fore.RED + f"[!] Hata: {e}")
