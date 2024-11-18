@@ -1,0 +1,4 @@
+pymysql==1.0.3
+tqdm==4.64.1
+colorama==0.4.6
+pyfiglet==0.8.post1
